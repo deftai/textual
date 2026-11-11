@@ -511,6 +511,8 @@ class Stylesheet:
         node._has_odd_or_even = (
             "odd" in all_pseudo_classes or "even" in all_pseudo_classes
         )
+        if node._has_order_style or node._has_odd_or_even:
+            node._order_pseudo_classes = node._get_order_pseudo_classes()
 
         cache_key: tuple | None = None
 

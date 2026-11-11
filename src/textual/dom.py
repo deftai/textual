@@ -15,6 +15,7 @@ from typing import (
     Any,
     Callable,
     ClassVar,
+    Final,
     Iterable,
     Mapping,
     Sequence,
@@ -80,6 +81,12 @@ ReactiveType = TypeVar("ReactiveType")
 
 QueryOneCacheKey: TypeAlias = "tuple[int, str, Type[Widget] | None]"
 """The key used to cache query_one results."""
+
+
+ORDER_PSEUDO_CLASSES: Final[frozenset[str]] = frozenset(
+    {"first-of-type", "last-of-type", "first-child", "last-child", "odd", "even", "empty"}
+)
+"""Pseudo classes that depend on a node's position among its siblings, or its children."""
 
 
 class BadIdentifier(Exception):
@@ -226,6 +233,8 @@ class DOMNode(MessagePump):
         """The node has an ordered dependent pseudo-style (`:odd`, `:even`, `:first-of-type`, `:last-of-type`, `:first-child`, `:last-child`)"""
         self._has_odd_or_even: bool = False
         """The node has the pseudo class `odd` or `even`."""
+        self._order_pseudo_classes: frozenset[str] | None = None
+        """Which position pseudo classes applied when CSS was last applied, if any can matter."""
         self._reactive_connect: (
             dict[str, tuple[MessagePump, Reactive[object] | object]] | None
         ) = None
@@ -1880,6 +1889,12 @@ class DOMNode(MessagePump):
             return self._PSEUDO_CLASSES[class_name](self)
         except KeyError:
             return False
+
+    def _get_order_pseudo_classes(self) -> frozenset[str]:
+        """The position pseudo classes this node has right now."""
+        return frozenset(
+            name for name in ORDER_PSEUDO_CLASSES if self.has_pseudo_class(name)
+        )
 
     def has_pseudo_classes(self, class_names: set[str]) -> bool:
         """Check the node has all the given pseudo classes.

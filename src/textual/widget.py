@@ -1487,17 +1487,18 @@ class Widget(DOMNode):
         )
 
         def update_styles(children: list[DOMNode]) -> None:
-            """Update order related CSS"""
-            if before is not None or after is not None:
-                # If the new children aren't at the end.
-                # we need to update both odd/even, first-of-type/last-of-type and first-child/last-child
-                for child in children:
-                    if child._has_order_style or child._has_odd_or_even:
-                        child.update_node_styles()
-            else:
-                for child in children:
-                    if child._has_order_style:
-                        child.update_node_styles()
+            """Update order related CSS, for the children whose position classes changed.
+
+            Restyling takes in everything beneath a child and usually redraws it, and most
+            children are in the same position relative to their siblings as they were.
+            """
+            # New children not at the end can also change odd/even of those after them.
+            inserted = before is not None or after is not None
+            for child in children:
+                if (child._has_order_style or (inserted and child._has_odd_or_even)) and (
+                    child._order_pseudo_classes != child._get_order_pseudo_classes()
+                ):
+                    child.update_node_styles()
 
         self.call_later(update_styles, self.displayed_children)
         await_mount = AwaitMount(self, mounted)
