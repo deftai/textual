@@ -536,7 +536,14 @@ class Input(ScrollView):
 
     def _watch_value(self, value: str) -> None:
         """Update the virtual size and suggestion when the value changes."""
-        self.virtual_size = Size(self.content_width, 1)
+        virtual_size = Size(self.content_width, 1)
+        # Unless the Input's size depends on its value, a new value doesn't need the
+        # screen to be laid out again, which costs more the more widgets there are.
+        needs_layout = self.styles.auto_dimensions or not self.is_mounted
+        if needs_layout:
+            self.virtual_size = virtual_size
+        else:
+            self.set_reactive(Input.virtual_size, virtual_size)
         self._suggestion = ""
         if self.suggester and value:
             self.run_worker(self.suggester._get_suggestion(self, value))
@@ -556,6 +563,11 @@ class Input(ScrollView):
             # Force a re-validation of the selection to ensure it accounts for
             # the length of the new value
             self.selection = self.selection
+
+        if not needs_layout:
+            # Do what a layout would have done for the Input: update its scrollbars and
+            # scroll position. A scrollbar appearing or going requests a layout itself.
+            self._scroll_update(self.virtual_size)
 
     def _watch_valid_empty(self) -> None:
         """Repeat validation when valid_empty changes."""
