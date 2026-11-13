@@ -3,11 +3,42 @@ from __future__ import annotations
 from math import cos, pi, sin
 from typing import Sequence
 
+from rich.color import Color as RichColor
 from rich.console import Console, ConsoleOptions, RenderResult
 from rich.segment import Segment
 from rich.style import Style
 
 from textual.color import Color, Gradient
+
+
+_CACHE_SIZE = 16384
+_rich_colors: dict[tuple[int, int, int], RichColor] = {}
+_styles: dict[tuple[tuple[int, int, int], tuple[int, int, int]], Style] = {}
+
+
+def _style(color: tuple[int, int, int], bgcolor: tuple[int, int, int]) -> Style:
+    """The style of a half block, shared between frames.
+
+    An animated gradient draws every cell anew many times a second, and the same colors come
+    round again: one Style for each pair means Rich and Textual's own caches of styles find
+    it, rather than each frame making, hashing and combining thousands of new ones.
+    """
+    key = (color, bgcolor)
+    style = _styles.get(key)
+    if style is None:
+        if len(_styles) >= _CACHE_SIZE:
+            _styles.clear()
+        style = _styles[key] = Style.from_color(_rich_color(color), _rich_color(bgcolor))
+    return style
+
+
+def _rich_color(rgb: tuple[int, int, int]) -> RichColor:
+    rich_color = _rich_colors.get(rgb)
+    if rich_color is None:
+        if len(_rich_colors) >= _CACHE_SIZE:
+            _rich_colors.clear()
+        rich_color = _rich_colors[rgb] = Color(*rgb).rich_color
+    return rich_color
 
 
 class VerticalGradient:
@@ -58,6 +89,27 @@ class LinearGradient:
             for stop, color in stops
         ]
         self._color_gradient = Gradient(*self._stops)
+        self._rgbs = [(color.r, color.g, color.b) for color in self._color_gradient.colors]
+
+    def _color_at(self, position: float) -> tuple[int, int, int]:
+        """The gradient's color at a position, as `Gradient.get_color` blends it, in RGB."""
+        rgbs = self._rgbs
+        if position <= 0:
+            return rgbs[0]
+        if position >= 1:
+            return rgbs[-1]
+        color_position = position * (len(rgbs) - 1)
+        color_index = int(color_position)
+        factor = color_position % 1
+        r1, g1, b1 = rgbs[color_index]
+        if factor <= 0:
+            return r1, g1, b1
+        r2, g2, b2 = rgbs[color_index + 1]
+        return (
+            int(r1 + (r2 - r1) * factor),
+            int(g1 + (g2 - g1) * factor),
+            int(b1 + (b2 - b1) * factor),
+        )
 
     def __rich_console__(
         self, console: Console, options: ConsoleOptions
@@ -75,8 +127,7 @@ class LinearGradient:
         new_line = Segment.line()
 
         _Segment = Segment
-        get_color = self._color_gradient.get_rich_color
-        from_color = Style.from_color
+        get_color = self._color_at
 
         for line_y in range(height):
             point_y = float(line_y) * 2 - center_y
@@ -92,22 +143,13 @@ class LinearGradient:
 
             if abs(delta_x) < 0.0001:
                 # Special case for verticals
-                yield _Segment(
-                    "▀" * width,
-                    from_color(
-                        get_color(x1),
-                        get_color(x2),
-                    ),
-                )
+                yield _Segment("▀" * width, _style(get_color(x1), get_color(x2)))
 
             else:
                 yield from [
                     _Segment(
                         "▀",
-                        from_color(
-                            get_color(x1 + x * delta_x),
-                            get_color(x2 + x * delta_x),
-                        ),
+                        _style(get_color(x1 + x * delta_x), get_color(x2 + x * delta_x)),
                     )
                     for x in range(width)
                 ]
