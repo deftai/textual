@@ -14,6 +14,7 @@ from textual.color import Color, Gradient
 _CACHE_SIZE = 16384
 _rich_colors: dict[tuple[int, int, int], RichColor] = {}
 _styles: dict[tuple[tuple[int, int, int], tuple[int, int, int]], Style] = {}
+_segments: dict[tuple[tuple[int, int, int], tuple[int, int, int]], Segment] = {}
 
 
 def _style(color: tuple[int, int, int], bgcolor: tuple[int, int, int]) -> Style:
@@ -111,6 +112,51 @@ class LinearGradient:
             int(b1 + (b2 - b1) * factor),
         )
 
+    def _row(
+        self, x1: float, x2: float, delta_x: float, width: int
+    ) -> list[Segment]:
+        """A row of half blocks, top color from x1 and bottom from x2, each moving delta_x a
+        cell: `_color_at` inline, and each pair's segment shared between frames."""
+        rgbs = self._rgbs
+        last = len(rgbs) - 1
+        first_rgb, last_rgb = rgbs[0], rgbs[-1]
+        segments = _segments
+        get_segment = segments.get
+        row: list[Segment] = []
+        append = row.append
+        for x in range(width):
+            pair = []
+            for position in (x1 + x * delta_x, x2 + x * delta_x):
+                if position <= 0:
+                    pair.append(first_rgb)
+                    continue
+                if position >= 1:
+                    pair.append(last_rgb)
+                    continue
+                color_position = position * last
+                color_index = int(color_position)
+                factor = color_position % 1
+                r1, g1, b1 = rgbs[color_index]
+                if factor <= 0:
+                    pair.append((r1, g1, b1))
+                    continue
+                r2, g2, b2 = rgbs[color_index + 1]
+                pair.append(
+                    (
+                        int(r1 + (r2 - r1) * factor),
+                        int(g1 + (g2 - g1) * factor),
+                        int(b1 + (b2 - b1) * factor),
+                    )
+                )
+            key = (pair[0], pair[1])
+            segment = get_segment(key)
+            if segment is None:
+                if len(segments) >= _CACHE_SIZE:
+                    segments.clear()
+                segment = segments[key] = Segment("▀", _style(*key))
+            append(segment)
+        return row
+
     def __rich_console__(
         self, console: Console, options: ConsoleOptions
     ) -> RenderResult:
@@ -146,13 +192,7 @@ class LinearGradient:
                 yield _Segment("▀" * width, _style(get_color(x1), get_color(x2)))
 
             else:
-                yield from [
-                    _Segment(
-                        "▀",
-                        _style(get_color(x1 + x * delta_x), get_color(x2 + x * delta_x)),
-                    )
-                    for x in range(width)
-                ]
+                yield from self._row(x1, x2, delta_x, width)
 
             yield new_line
 
