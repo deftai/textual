@@ -166,6 +166,39 @@ class AwaitMount:
         return await_mount().__await__()
 
 
+_STYLE_SUMS_KEPT = 4096
+_style_sums: dict[Style, dict[int, tuple[Style | None, Style]]] = {}
+
+
+def _style_adder(base: Style) -> Callable[[Style | None], Style]:
+    """`base.__add__`, remembering what it gave for each style it was given.
+
+    Rich's own cache of sums holds 1,024, so it gives up on a renderable with more styles than
+    that, such as an animated gradient that colours every cell. The styles are remembered by
+    identity, with the style kept so that its id can't be reused, which saves hashing each one.
+    """
+    sums = _style_sums.get(base)
+    if sums is None:
+        if len(_style_sums) >= 16:
+            _style_sums.clear()
+        sums = _style_sums[base] = {}
+    add = base.__add__
+    get = sums.get
+
+    def apply(style: Style | None) -> Style:
+        found = get(id(style))
+        if found is not None and found[0] is style:
+            return found[1]
+        combined = add(style)
+        if not combined.link:  # Links get a copy of their own each time.
+            if len(sums) >= _STYLE_SUMS_KEPT:
+                sums.clear()
+            sums[id(style)] = (style, combined)
+        return combined
+
+    return apply
+
+
 class _Styled:
     """Apply a style to a renderable.
 
@@ -189,7 +222,7 @@ class _Styled:
 
         _Segment = Segment
         if style:
-            apply = style.__add__
+            apply = _style_adder(style)
             result_segments = (
                 _Segment(text, apply(_style), None)
                 for text, _style, control in result_segments
