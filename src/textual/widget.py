@@ -199,6 +199,33 @@ def _style_adder(base: Style) -> Callable[[Style | None], Style]:
     return apply
 
 
+def _link_styled(segment: Segment, link_style: Style) -> Segment:
+    """A segment with the link style added if it's clickable; the same segment if not."""
+    style = segment.style
+    assert style is not None
+    if style._meta is None:
+        return segment
+    return Segment(
+        segment.text,
+        style + link_style if "@click" in style.meta else style,
+        segment.control,
+    )
+
+
+def _styled_and_linked(
+    segments: Iterable[Segment],
+    apply: Callable[[Style | None], Style],
+    link_style: Style,
+) -> Iterable[Segment]:
+    """Segments with a style added, then the link style if they're clickable."""
+    _Segment = Segment
+    for text, style, _control in segments:
+        combined = apply(style)
+        if combined._meta is not None and "@click" in combined.meta:
+            combined = combined + link_style
+        yield _Segment(text, combined, None)
+
+
 class _Styled:
     """Apply a style to a renderable.
 
@@ -221,26 +248,21 @@ class _Styled:
         result_segments = console.render(self.renderable, options)
 
         _Segment = Segment
+        link_style = self.link_style
+        if style and link_style:
+            # Both at once: one new segment for each, rather than one for each step.
+            return _styled_and_linked(result_segments, _style_adder(style), link_style)
         if style:
             apply = _style_adder(style)
             result_segments = (
                 _Segment(text, apply(_style), None)
                 for text, _style, control in result_segments
             )
-        link_style = self.link_style
         if link_style:
             result_segments = (
-                _Segment(
-                    text,
-                    (
-                        style
-                        if style._meta is None
-                        else (style + link_style if "@click" in style.meta else style)
-                    ),
-                    control,
-                )
-                for text, style, control in result_segments
-                if style is not None
+                _link_styled(segment, link_style)
+                for segment in result_segments
+                if segment.style is not None
             )
         return result_segments
 
